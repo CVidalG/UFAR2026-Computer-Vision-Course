@@ -20,7 +20,7 @@ curl -LO https://raw.githubusercontent.com/CVidalG/UFAR2026-Computer-Vision-Cour
 - At the first run, the script downloads and installs into this folder (internet access required):
   - `envs/label-studio/`: Label Studio 1.23.2 (with `sentry-sdk<3`);
   - `label-studio-ml-backend/`: the ML backend framework, from [GitHub](https://github.com/HumanSignal/label-studio-ml-backend) (zip archive of commit `f3a2b7e`);
-  - `envs/ml-backend/`: `label-studio-ml` (from `label-studio-ml-backend/`), `ultralytics==8.4.216` and `label-studio-sdk==2.1.6` (fixed in `envs/ml-backend-overrides.txt`); with `--mode caption`, `transformers`; with `--cold-start`, `clip`;
+  - `envs/ml-backend/`: `label-studio-ml` (from `label-studio-ml-backend/`), `ultralytics==8.4.216`, `label-studio-sdk==2.1.6` and OpenCV 5.0.0.93 (versions fixed in `envs/ml-backend-overrides.txt`; OpenCV 5.1 has no wheel before macOS 15); with `--mode caption`, `transformers`; with `--cold-start`, `clip`;
   - `yolo_backend/`: created by `label-studio-ml create`, with the `model.py` of this repository (`yolo_backend/model.py`);
   - `data/ml-backend/`: the weights of the model of the mode (e.g. `yolo26n.pt`, 5.5 MB); with `--cold-start`, `yoloe-26s-seg.pt` (30 MB) and its text encoder `mobileclip2_b.ts` (242 MB), or CLIP ViT-B/32 in `clip/` (338 MB, `classify`); with `--mode caption`, BLIP base in `huggingface/` (945 MB).
 - Disk space: about 2 GB, up to 1.5 GB more with `--cold-start` and `--mode caption` (sizes in MiB); each installation command is printed before it runs. uv keeps its own cache, and the Python it installs if needed, in its folders.

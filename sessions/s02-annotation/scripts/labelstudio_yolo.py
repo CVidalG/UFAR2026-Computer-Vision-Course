@@ -47,6 +47,9 @@ ML_BACKEND_ZIP = f"https://github.com/HumanSignal/label-studio-ml-backend/archiv
 # (not 2.1.2, the one of Label Studio 1.23.2: its OpenCV 4.12 needs numpy < 2.3, which Ultralytics 8.4.216 excludes
 # on macOS)
 SDK = "label-studio-sdk==2.1.6"
+# OpenCV 5.1 has wheels for macOS 15 or later only (elsewhere, a build from source of an hour): 5.0, with wheels for
+# macOS 13 or later, Windows and Linux
+OPENCV = ["opencv-python==5.0.0.93", "opencv-python-headless==5.0.0.93"]
 ULTRALYTICS = "ultralytics==8.4.216"
 # --cold-start: CLIP (text encoder of YOLOE; classify), fork of Ultralytics at a fixed commit
 CLIP = "clip @ https://github.com/ultralytics/CLIP/archive/7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40.zip"
@@ -251,7 +254,7 @@ def main():
     repo = download_ml_backend()
     packages = ["-e", repo, ULTRALYTICS] + ([TRANSFORMERS] if args.mode == "caption" else []) + \
                ([CLIP] if args.cold_start else [])
-    python_ml = os.path.join(environment("ml-backend", packages, [SDK]), BIN, "python" + EXE)
+    python_ml = os.path.join(environment("ml-backend", packages, [SDK, *OPENCV]), BIN, "python" + EXE)
 
     # 3. The YOLO backend
     backend_dir = create_yolo_backend(python_ml, model_dir)
