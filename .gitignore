@@ -33,6 +33,8 @@
 build/
 
 .venv/
+envs/
+label-studio-ml-backend/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
