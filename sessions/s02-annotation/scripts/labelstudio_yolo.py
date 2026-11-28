@@ -6,7 +6,7 @@
 
     uv run labelstudio_yolo.py path/to/images [--mode detect|segment|semantic|pose|classify|caption]
 
-Only this file is needed (and uv, 0.6.8 or later). In its folder, the script:
+Only this file is needed (and uv, 0.8.18 or later). In its folder, the script:
 1. installs Label Studio in envs/label-studio (first run);
 2. downloads the ML backend framework into label-studio-ml-backend/ (zip of a fixed commit, GitHub) and installs it,
    with Ultralytics, in envs/ml-backend (first run);
@@ -83,8 +83,9 @@ MODES = {
     "caption": ("Image Captioning", "TextArea", "Salesforce/blip-image-captioning-base"),
 }
 PYTHON = "3.12"
-# uv: --managed-python (0.6.8), --torch-backend auto with triton (0.8.13)
-UV_MIN = (0, 8, 13)
+# uv: --managed-python (0.6.8); --torch-backend with triton (added in 0.8.13, removed by mistake in 0.8.17, back in
+# 0.8.18)
+UV_MIN = (0, 8, 18)
 IMAGE_FILES = r"(?i).*\.(jpe?g|png|gif|bmp|webp)$"
 # Data Manager: the tab of the tasks not yet annotated, those the model is least sure of first (semantic, caption:
 # predictions without score, not ordered); the default tab, with the columns Label Studio gives it
@@ -99,11 +100,25 @@ DEFAULT_TAB = {"title": "Default", "type": "list", "target": "tasks", "hiddenCol
                                                  "annotators", "predictions_score", "predictions_model_versions"]]}}
 
 
+def nvidia():
+    # An NVIDIA GPU (Linux, Windows): its driver's nvidia-smi
+    return sys.platform != "darwin" and shutil.which("nvidia-smi") is not None
+
+
+def torch_backend():
+    # PyTorch for this machine: with CUDA for an NVIDIA GPU (uv: the version of CUDA of the driver), otherwise for the
+    # CPU (Linux, Windows: not auto, which takes XPU for an Intel GPU, integrated ones included, or ROCm for an AMD
+    # one); macOS: the PyTorch of PyPI
+    if sys.platform == "darwin":
+        return []
+    return ["--torch-backend", "auto" if nvidia() else "cpu"]
+
+
 def first_run_needs():
     # The first run, mode detect (measured 2026-11-28: the wheels, packed and unpacked; on macOS, this folder): what is
     # downloaded and the disk it takes, the free disk space needed; with an NVIDIA GPU (Linux, Windows), PyTorch with
-    # CUDA (--torch-backend auto)
-    if sys.platform != "darwin" and shutil.which("nvidia-smi"):
+    # CUDA
+    if nvidia():
         return "up to 3.5 GB to download and 7 GB of disk (PyTorch with CUDA, for the NVIDIA GPU)", 8
     return "about 0.6 to 0.8 GB to download, about 2 to 2.5 GB of disk", 4
 
@@ -143,12 +158,12 @@ def run(command, **kwargs):
 
 def environment(name, packages, overrides=(), torch=False):
     # A Python environment in envs/<name>, with these packages (overrides: versions imposed on their dependencies;
-    # torch: PyTorch for this machine, --torch-backend auto: with CUDA for an NVIDIA GPU, otherwise for the CPU):
+    # torch: PyTorch for this machine, see torch_backend()):
     # created and installed at the first run, completed when the packages change
     path = os.path.join(HERE, "envs", name)
     python = os.path.join(path, BIN, "python" + EXE)
     done = os.path.join(path, "installed.txt")
-    options = ["--torch-backend", "auto"] if torch else []
+    options = torch_backend() if torch else []
     wanted = "\n".join([*packages, *overrides, *options])
     if os.path.exists(done):
         with open(done) as f:
@@ -612,17 +627,18 @@ def serve_dashboard(d, host, port, key):
                 return self.send(b"Forbidden", "text/plain", 403)
             path, _, query = self.path.partition("?")
             q = {k: v[0] for k, v in urllib.parse.parse_qs(query).items()}
-            if secrets.compare_digest(q.get("key", ""), key):
+            # (keys compared as bytes: any text accepted, a key with accents included)
+            if secrets.compare_digest(q.get("key", "").encode(), key.encode()):
                 # The address printed by the launcher: the key kept in a cookie, the page without it
                 return self.send(b"", headers=[("Set-Cookie", f"{cookie}={key}; Path=/; HttpOnly; SameSite=Strict"),
                                                ("Location", "/")], code=303)
             jar = dict(c.strip().split("=", 1) for c in self.headers.get("Cookie", "").split(";") if "=" in c)
-            if not secrets.compare_digest(jar.get(cookie, ""), key):
+            if not secrets.compare_digest(jar.get(cookie, "").encode(), key.encode()):
                 return self.send(b"Open the address of the dashboard printed by labelstudio_yolo.py (with its key)",
                                  "text/plain; charset=utf-8", 403)
             try:
                 if path == "/":
-                    self.send(dashboard_page(d, f"http://{hostname}:{d['ls_port']}").encode())
+                    self.send(dashboard_page(d, f"http://{html.escape(hostname)}:{d['ls_port']}").encode())
                 elif path == "/image":
                     # (the path of an image as Label Studio has it: relative to the parent folder, quoted)
                     self.file(os.path.join(d["root"], urllib.parse.unquote(q.get("d", ""))), d["images"],
@@ -667,10 +683,16 @@ def main():
     parser.add_argument("--dashboard", action="store_true",
                         help="trial: a summary page of the project (progress, annotations per label, metric over the "
                              "trainings, pace, tasks to annotate first), port 8282 or next free")
-    parser.add_argument("--host", default="127.0.0.1",
-                        help="address on which Label Studio and the dashboard listen (default: 127.0.0.1, this machine "
-                             "only; 0.0.0.0: all its addresses, e.g. a server reached at its IP)")
+    parser.add_argument("--host", default="127.0.0.1", choices=["127.0.0.1", "0.0.0.0"],
+                        help="where Label Studio and the dashboard listen: 127.0.0.1 (default), this machine only; "
+                             "0.0.0.0, all its addresses (e.g. a server reached at its IP)")
     args = parser.parse_args()
+    if os.name == "nt":
+        # The output of this script in UTF-8 (paths in any script: accents, Armenian...), even redirected to a file;
+        # Ctrl-Break as Ctrl-C (the test of GitHub Actions stops the launcher this way)
+        for stream in (sys.stdout, sys.stderr):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
 
     images = os.path.abspath(args.images)
     template, _, default_model = MODES[args.mode]
@@ -683,6 +705,8 @@ def main():
     if not top:
         sys.exit(f"No image (jpg, png, gif, bmp, webp) in {images}" +
                  (f"; {below} in its subfolders, which are not imported: give a subfolder" if below else ""))
+    if args.labels and args.mode == "caption":
+        sys.exit("--labels: not used with --mode caption (a caption, no label)")
     if args.cold_start and args.mode in ("pose", "caption"):
         sys.exit("--cold-start: modes detect, segment, semantic and classify only")
     if intel_mac():
@@ -718,7 +742,8 @@ def main():
            free_port(args.ml_port), "ml_user": "label-studio", "ml_password": secrets.token_urlsafe(12)}
     if any(k not in settings for k in new):
         settings = {**new, **settings}
-        with open(os.open(settings_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        with open(os.open(settings_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600),
+                  "w") as f:
             json.dump(settings, f, indent=2)
     if os.name == "posix":
         os.chmod(settings_file, 0o600)
@@ -731,8 +756,8 @@ def main():
     ml_auth = {"Authorization": "Basic " + base64.b64encode(
         f"{settings['ml_user']}:{settings['ml_password']}".encode()).decode()}
     # Label Studio at the address of this machine on its network (--host 0.0.0.0, or an address of the machine)
-    local = args.host in ("127.0.0.1", "localhost")
-    address = "localhost" if local else (machine_address() if args.host == "0.0.0.0" else args.host)
+    local = args.host == "127.0.0.1"
+    address = "localhost" if local else machine_address()
 
     # First run: what it takes, if the disk has room for it
     first_run, disk_gb = first_run_needs()
@@ -776,8 +801,8 @@ def main():
                 script = ("import json, sys; from ultralytics import YOLO; m = YOLO(sys.argv[1]); "
                           "print(json.dumps([list(m.names.values()), getattr(m.model, 'kpt_names', None)]))")
                 out = subprocess.run([python_ml, "-c", script, model], cwd=model_dir,
-                                     env=dict(os.environ, YOLO_CONFIG_DIR=ultralytics_dir),
-                                     capture_output=True, text=True, check=True).stdout
+                                     env=dict(os.environ, YOLO_CONFIG_DIR=ultralytics_dir, PYTHONUTF8="1"),
+                                     capture_output=True, encoding="utf-8", errors="replace", check=True).stdout
             except subprocess.CalledProcessError as e:
                 # (e.g. a misspelt --model; its error, captured: the last line)
                 sys.exit(f"Could not read the classes of {model}: " +
@@ -798,6 +823,8 @@ def main():
     # a backend on this machine allowed (ML_BLOCK_LOCAL_IP: its URL; SSRF_PROTECTION_ENABLED: its webhook);
     # the first request to the backend can take minutes (model downloaded: YOLOE, CLIP, BLIP): waited for
     ls_vars = dict(os.environ,
+                   # UTF-8 for its output and files (Windows: otherwise the code page of the console, cp1252...)
+                   PYTHONUTF8="1",
                    LABEL_STUDIO_BASE_DATA_DIR=os.path.join(data, "label-studio"),
                    LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED="true",
                    LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=root,
@@ -807,9 +834,15 @@ def main():
                    ML_TIMEOUT_PREDICT="600",
                    # target storage (--save-annotations): one JSON per task, the task and its annotations
                    FUTURE_SAVE_TASK_TO_STORAGE="true",
-                   # reached at the address of the machine (--host): new accounts with the invite link only
-                   # (Organization > Add Members); otherwise anyone reaching it could sign up and see the projects
-                   LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK="false" if local else "true",
+                   # new accounts with the invite link only (printed below; Organization > Add Members): otherwise
+                   # anyone reaching it (another account of a server, the network with --host 0.0.0.0) could sign up
+                   # and see the projects
+                   LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK="true",
+                   # its account, in its environment (readable by this account only), not on its command line (that
+                   # of every process can be read by all the accounts of the machine)
+                   LABEL_STUDIO_USERNAME=settings["username"],
+                   LABEL_STUDIO_PASSWORD=settings["password"],
+                   LABEL_STUDIO_USER_TOKEN=settings["token"],
                    # prediction score of a task (Data Manager: Order by Prediction score, the tab below): that of the
                    # predictions of the current model of the backend; without it (flag off by default), that of the
                    # predictions of version project.model_version, "YOLO" here (the backend, for the predictions asked
@@ -850,13 +883,13 @@ def main():
     print("[4/5] Servers: Label Studio (its log: data/label-studio.log), ML backend (its log below)", flush=True)
     servers["Label Studio"] = subprocess.Popen(
         [label_studio, "start", "--no-browser", "--internal-host", args.host, "--port", str(settings["port"]),
-         "--username", settings["username"], "--password", settings["password"],
-         "--user-token", settings["token"], "--enable-legacy-api-token"],
+         "--enable-legacy-api-token"],
         env=ls_vars, stdout=ls_log, stderr=subprocess.STDOUT, **group)
 
     # The ML backend of yolo_backend/ (its log in this terminal): reads the images from the same folder, calls Label
     # Studio with the token; its files (weights, datasets, runs, models) in data/ml-backend
     ml_vars = dict(os.environ,
+                   PYTHONUTF8="1",
                    LABEL_STUDIO_URL=url,
                    LABEL_STUDIO_API_KEY=settings["token"],
                    LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=root,
@@ -957,11 +990,17 @@ def main():
             print("Connecting the ML backend to the project (first run: the model may be downloaded)...", flush=True)
             api("POST", "/api/ml", {"project": pid, "url": ml_url, "title": "YOLO", **account})
         for backend in backends:
-            if backend.get("auth_method") != "BASIC_AUTH" or backend.get("basic_auth_user") != settings["ml_user"]:
-                # (with its URL and project: Label Studio 1.23.2 checks the backend at each change, /health and /setup,
-                # with what the request gives)
+            if backend.get("url", "").rstrip("/") == ml_url and (backend.get("auth_method") != "BASIC_AUTH" or
+                                                                 backend.get("basic_auth_user") != settings["ml_user"]):
+                # (this backend only; with its URL and project: Label Studio 1.23.2 checks the backend at each change,
+                # /health and /setup, with what the request gives)
                 api("PATCH", f"/api/ml/{backend['id']}", {"project": pid, "url": ml_url,
                                                           "title": backend.get("title") or "YOLO", **account})
+        # The webhook Label Studio adds for the backend (every event, without its account: refused, 401) turned off;
+        # trainings (Start Training, --train-every) go through the connection of the backend, with its account
+        for hook in api("GET", f"/api/webhooks/?project={pid}"):
+            if hook.get("url", "").rstrip("/") == ml_url + "/webhook" and hook.get("is_active"):
+                api("PATCH", f"/api/webhooks/{hook['id']}/", {"is_active": False})
         # Predictions of the backend shown, and asked for, when a task opens; training every N annotations (0: never)
         api("PATCH", f"/api/projects/{pid}", {"show_collab_predictions": True, "model_version": "YOLO",
                                               "min_annotations_to_start_training": args.train_every})
@@ -1004,8 +1043,8 @@ def main():
                                               "images": images, "model_dir": model_dir, "ls_port": settings["port"]},
                                              args.host, port, key))
             board = f"\nDashboard      http://{address}:{port}/?key={key}"
-        accounts = ("or Sign up: a new account" if local else
-                    "new accounts: the invite link of Organization > Add Members")
+        # New accounts: the invite link (Organization > Add Members gives it too)
+        accounts = "new accounts: " + public + api("GET", "/api/invite")["invite_url"]
 
         print(f"""
 Label Studio   {public}/projects/{pid}/data{board}

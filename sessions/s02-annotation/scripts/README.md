@@ -4,7 +4,7 @@ Label Studio 1.23.2 and an ML backend with YOLO (Ultralytics 8.4.216): pre-annot
 
 ## Installation
 
-- Requirement: [uv](https://docs.astral.sh/uv/getting-started/installation/), 0.8.13 or later to install the environments, checked by the script (it also installs Python):
+- Requirement: [uv](https://docs.astral.sh/uv/getting-started/installation/), 0.8.18 or later to install the environments, checked by the script (it also installs Python):
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -20,7 +20,7 @@ curl -LO https://raw.githubusercontent.com/CVidalG/UFAR2026-Computer-Vision-Cour
 - At the first run, the script downloads and installs into this folder (internet access required):
   - `envs/label-studio/`: Label Studio 1.23.2 (with `sentry-sdk<3`);
   - `label-studio-ml-backend/`: the ML backend framework, from [GitHub](https://github.com/HumanSignal/label-studio-ml-backend) (zip archive of commit `f3a2b7e`);
-  - `envs/ml-backend/`: `label-studio-ml` (from `label-studio-ml-backend/`), `ultralytics==8.4.216`, `label-studio-sdk==2.1.6` and OpenCV 5.0.0.93 (versions fixed in `envs/ml-backend-overrides.txt`; OpenCV 5.1 has no wheel before macOS 15); PyTorch for this machine (`uv pip install --torch-backend auto`: with CUDA for an NVIDIA GPU, otherwise for the CPU); with `--mode caption`, `transformers`; with `--cold-start`, `clip`;
+  - `envs/ml-backend/`: `label-studio-ml` (from `label-studio-ml-backend/`), `ultralytics==8.4.216`, `label-studio-sdk==2.1.6` and OpenCV 5.0.0.93 (versions fixed in `envs/ml-backend-overrides.txt`; OpenCV 5.1 has no wheel before macOS 15); PyTorch for this machine (`uv pip install --torch-backend`: `auto` with an NVIDIA GPU, PyTorch with the CUDA of its driver; otherwise `cpu`; macOS: the PyTorch of PyPI); with `--mode caption`, `transformers`; with `--cold-start`, `clip`;
   - `yolo_backend/`: created by `label-studio-ml create`, with the `model.py` of this repository (`yolo_backend/model.py`);
   - `data/ml-backend/`: the weights of the model of the mode (e.g. `yolo26n.pt`, 5.5 MiB); with `--cold-start`, `yoloe-26s-seg.pt` (30 MiB) and its text encoder `mobileclip2_b.ts` (242 MiB), or CLIP ViT-B/32 in `clip/` (338 MiB, `classify`); with `--mode caption`, BLIP base in `huggingface/` (945 MiB).
 - First run (mode `detect`): about 0.6 to 0.8 GB downloaded and 2 to 2.5 GB of disk; with an NVIDIA GPU (Linux, Windows: PyTorch with CUDA), up to 3.5 GB and 7 GB; up to about 1.6 GB more with `--cold-start` and `--mode caption`. At the first run, the script stops when the disk of this folder has less than 4 GB free (with an NVIDIA GPU: 8 GB). Each installation command is printed before it runs. uv keeps its own cache, and its own Python 3.12 (`--managed-python`: not the one of conda or Homebrew), in its folders.
@@ -55,13 +55,13 @@ uv run labelstudio_yolo.py path/to/images --mode detect
 | `--port`, `--ml-port` | 8080, 9090, or the next free ports (first run) |
 | `--no-browser` | off: the project (or the dashboard) opens in the browser, on a desktop |
 | `--dashboard` | off; on (a trial): a summary page of the project, see [Dashboard](#dashboard-a-trial) |
-| `--host` | `127.0.0.1`: Label Studio and the dashboard for this machine only; `0.0.0.0`: at the address of the machine on its network, see [On a server](#on-a-server) |
+| `--host` | `127.0.0.1`: Label Studio and the dashboard for this machine only; or `0.0.0.0`: at the address of the machine on its network, see [On a server](#on-a-server) |
 
 - The project opens in the browser, on a desktop (the URL printed by the script, `http://localhost:8080/projects/1/data`).
 - Instructions shown before labeling (*Settings* > *Annotation* > *Labeling Instructions*; written in a project without instructions), and a tab of the *Data Manager*, *To annotate*: the tasks not yet annotated, lowest prediction score first (`semantic`, `caption`: not ordered, the predictions having no score). The score is that of the predictions of the current model: Label Studio is started with `ff_front_dev_1682_model_version_dropdown_070622_short=true` (without it, *Order by Prediction score* sorts nothing here).
 - Images: those of the folder itself (`jpg`, `png`, `gif`, `bmp`, `webp`); its subfolders are not imported.
-- Log in with the email and password printed by the script (`annotator@example.com`, password in `data/settings.json`), or *Sign up* to create an account.
-- `data/` (for this account only): `settings.json` (user, password, API token, ports, account of the ML backend), `label-studio/` (database), `label-studio.log`, `ml-backend/` (weights, datasets, training runs, trained models).
+- Log in with the email and password printed by the script (`annotator@example.com`, password in `data/settings.json`). New accounts: with the invite link printed by the script (also in *Organization* > *Add Members*); without it, *Sign up* is refused.
+- `data/` (Linux, macOS: for this account only): `settings.json` (user, password, API token, ports, account of the ML backend), `label-studio/` (database), `label-studio.log`, `ml-backend/` (weights, datasets, training runs, trained models).
 - Annotations: in the database, `data/label-studio/label_studio.sqlite3`. To get them: *Export* in the project (JSON, CSV, COCO, Pascal VOC, YOLO, with or without the images), or `--save-annotations` (one `<task id>.json` per task: the task and its annotations, with annotator, dates, time spent).
 - Same command again: same project (its title: the name of the images folder, and the mode); the new images of the folder are imported. With `--labels` other than those of the project, the script stops: `--title` for a new project with these labels on the same images, or change its labels in Label Studio (*Settings* > *Labeling Interface*).
 - One mode per run: the backend refuses the projects of another mode (made by another run), with an error in its log; run the launcher again in their mode (`--mode`).
@@ -98,7 +98,8 @@ uv run labelstudio_yolo.py path/to/images --mode detect
 
 ## On a server
 
-- Label Studio, the ML backend and the dashboard listen on `127.0.0.1` (default): from another computer, through an SSH tunnel, e.g. `ssh -L 8080:localhost:8080 -L 8282:localhost:8282 server`, then the addresses printed by the script.
-- `--host 0.0.0.0`: Label Studio and the dashboard at the address of the server on its network (printed by the script), for annotators on that network; new accounts with the invite link only (*Organization* > *Add Members*; the people invited see all the projects). The ML backend stays on `127.0.0.1`. No HTTPS: on a network you trust only.
-- Other accounts of the server: `data/` is for your account only; the ML backend asks for its account (in `data/settings.json`, given to Label Studio by the script); the dashboard asks for the key of its address.
+- Label Studio, the ML backend and the dashboard listen on `127.0.0.1` (default): from another computer, through an SSH tunnel with the same port numbers on both sides (the button *Open Label Studio* of the dashboard uses them), e.g. `ssh -L 8080:localhost:8080 -L 8282:localhost:8282 server`, then the addresses printed by the script.
+- `--host 0.0.0.0`: Label Studio and the dashboard at the address of the server on its network (printed by the script), for annotators on that network. The ML backend stays on `127.0.0.1`. No HTTPS: on a network you trust only.
+- New accounts with the invite link only (printed by the script; the people invited see all the projects).
+- Other accounts of the server: `data/` is for your account only; the password and the token of Label Studio are given to it in its environment, not on its command line; the ML backend asks for its account (in `data/settings.json`, given to Label Studio by the script); the dashboard asks for the key of its address. With a group that can write in your folders (umask 002), keep the folder of the launcher for you only (`chmod 700`).
 - uv keeps its cache in your home folder (`UV_CACHE_DIR` to put it elsewhere).

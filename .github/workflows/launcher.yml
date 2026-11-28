@@ -5,7 +5,7 @@ name: Label Studio launcher
 on:
   push:
     paths:
-      - "sessions/s02-annotation/scripts/**"
+      - "sessions/s02-annotation/scripts/**.py"
       - ".github/workflows/launcher.yml"
   workflow_dispatch:
 
@@ -14,11 +14,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: sessions/s02-annotation/scripts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv (as in the README)
         if: runner.os != 'Windows'
@@ -34,4 +37,4 @@ jobs:
           "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Run the launcher and check it
-        run: uv run --no-project python sessions/s02-annotation/scripts/test_launcher.py sessions/s02-annotation/datasets/dataset-s02-2
+        run: uv run --no-project python test_launcher.py ../datasets/dataset-s02-2
