@@ -1,0 +1,37 @@
+name: Label Studio launcher
+
+# The launcher of S2 (sessions/s02-annotation/scripts/labelstudio_yolo.py), installed and run as a user does, on
+# Ubuntu, Windows and macOS (Apple silicon), at each change of the scripts
+on:
+  push:
+    paths:
+      - "sessions/s02-annotation/scripts/**"
+      - ".github/workflows/launcher.yml"
+  workflow_dispatch:
+
+jobs:
+  launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv (as in the README)
+        if: runner.os != 'Windows'
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+          "$env:USERPROFILE\.local\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Run the launcher and check it
+        run: uv run --no-project python sessions/s02-annotation/scripts/test_launcher.py sessions/s02-annotation/datasets/dataset-s02-2
